@@ -1,0 +1,133 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  HR_ADMIN
+  BRANCH_MANAGER
+  STAFF
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  ON_LEAVE
+  HALF_DAY
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  CORRECTION
+}
+
+model Branch {
+  id              String     @id @default(uuid())
+  name            String
+  code            String     @unique
+  address         String
+  latitude        Decimal
+  longitude       Decimal
+  allowedRadiusM  Int        // Geo-fence radius in meters
+  staticIp        String?    // Branch network IP whitelist
+
+  employees       Employee[]
+  shifts          Shift[]
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model Employee {
+  id              String     @id @default(uuid())
+  employeeCode    String     @unique
+  firstName       String
+  lastName        String
+  email           String     @unique
+  phone           String?
+  role            Role
+  isActive        Boolean    @default(true)
+
+  branchId        String
+  branch          Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  shiftId         String?
+  shift           Shift?     @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  attendance      AttendanceRecord[]
+  auditLogs       AuditLog[] @relation("ActorAuditLogs")
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model Shift {
+  id              String     @id @default(uuid())
+  name            String
+  startTime       DateTime
+  endTime         DateTime
+  gracePeriodMin  Int        @default(10)
+
+  branchId        String
+  branch          Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  employees       Employee[]
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model AttendanceRecord {
+  id              String            @id @default(uuid())
+  employeeId      String
+  employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  date            DateTime
+  checkIn         DateTime?
+  checkOut        DateTime?
+  status          AttendanceStatus
+
+  checkInLat      Decimal?
+  checkInLong     Decimal?
+  checkOutLat     Decimal?
+  checkOutLong    Decimal?
+
+  ipAddress       String?
+
+  overtimeMinutes Int               @default(0)
+  isManualEntry   Boolean           @default(false)
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([employeeId, date]) // Prevent double attendance for same day
+}
+
+model AuditLog {
+  id              String       @id @default(uuid())
+  action          AuditAction
+  tableName       String
+  recordId        String
+
+  actorId         String
+  actor           Employee     @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: Restrict)
+
+  oldData         Json?
+  newData         Json?
+
+  reason          String       // Mandatory reason for correction
+  ipAddress       String
+
+  createdAt       DateTime     @default(now())
+
+  @@index([tableName, recordId])
+}
